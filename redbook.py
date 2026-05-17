@@ -3,7 +3,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Gio, GObject, GdkPixbuf, Gdk
-import sqlite3, zipfile, json, csv, shutil, urllib.parse, html
+import sqlite3, zipfile, json, csv, shutil, urllib.parse, html, hashlib
 from pathlib import Path
 from datetime import date, datetime
 
@@ -35,7 +35,7 @@ CSS = b"""
 .large-title { font-size: 24px; font-weight: 900; }
 .stat-number { font-size: 22px; font-weight: 900; }
 .stat-card { padding: 10px; border-radius: 16px; min-width: 130px; }
-.book-card { padding: 10px; border-radius: 18px; min-width: 190px; }
+.book-card { padding: 8px; border-radius: 18px; min-width: 170px; }
 .book-title { font-weight: 800; font-size: 14px; }
 .stat-label { font-size: 12px; font-weight: 700; }
 .detail-title { font-size: 30px; font-weight: 900; }
@@ -80,10 +80,24 @@ class Database:
             updated_at TEXT DEFAULT ''
         )
         """)
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT DEFAULT ''
+        )
+        """)
         columns = [r["name"] for r in self.conn.execute("PRAGMA table_info(books)").fetchall()]
         for col in ["first_publish_year", "openlibrary_key"]:
             if col not in columns:
                 self.conn.execute(f"ALTER TABLE books ADD COLUMN {col} TEXT DEFAULT ''")
+        self.conn.commit()
+
+    def get_setting(self, key, default=""):
+        row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key, value):
+        self.conn.execute("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
         self.conn.commit()
 
     def books(self, text="", shelf="All"):
@@ -232,6 +246,24 @@ def fetch_metadata(query):
         "openlibrary_key": work_key,
         "cover_url": f"https://covers.openlibrary.org/b/id/{cover}-L.jpg" if cover else "",
     }
+
+def fetch_goodreads_data(title, author=""):
+    if not requests or not title.strip():
+        return None
+    try:
+        q = f"{title} {author}".strip()
+        u = "https://www.goodreads.com/search?" + urllib.parse.urlencode({"q": q, "search_type": "books"})
+        r = requests.get(u, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        re = __import__("re")
+        m = re.search(r'"averageRating":\s*([\d.]+)', r.text)
+        rating = max(0, min(5, round(float(m.group(1))))) if m else None
+        cm = re.search(r'<img[^>]+class="bookCover"[^>]+src="([^"]+)"', r.text) or re.search(r'"image"\s*:\s*"([^"]+)"', r.text)
+        cover_url = cm.group(1).replace("\\/", "/") if cm else ""
+        return {"rating": rating, "cover_url": cover_url}
+    except Exception:
+        return {}
 
 def img_for_path(path, w, h):
     if path and Path(path).exists():
@@ -408,11 +440,14 @@ class BookEditor(Adw.Window):
             if meta.get("description"):
                 self.tv_set(self.description, meta["description"])
             self.openlibrary_key = meta.get("openlibrary_key", "")
-            cover = download_cover(meta.get("cover_url", ""), meta.get("title") or self.title.get_text() or "book")
+            gr = fetch_goodreads_data(meta.get("title", "") or self.title.get_text(), meta.get("author", "") or self.author.get_text())
+            if gr.get("rating") is not None:
+                self.rating.set_selected(gr["rating"])
+            cover = download_cover(gr.get("cover_url") or meta.get("cover_url", ""), meta.get("title") or self.title.get_text() or "book")
             if cover:
                 self.cover_path = cover
                 self.refresh_cover()
-                self.toast.add_toast(Adw.Toast(title="Metadata and cover loaded"))
+                self.toast.add_toast(Adw.Toast(title="Metadata loaded (OpenLibrary + Goodreads rating)"))
             else:
                 self.toast.add_toast(Adw.Toast(title="Metadata loaded; no cover found"))
         except Exception as e:
@@ -591,6 +626,8 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Backup Library", "app.backup")
         menu.append("Restore Backup", "app.restore")
         menu.append("Export CSV", "app.exportcsv")
+        menu.append("Lock App", "app.lock")
+        menu.append("Set/Change Password", "app.setpassword")
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
 
@@ -726,15 +763,15 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_size_request(214, 360)
+        btn.set_size_request(188, 314)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
         card.add_css_class("view")
-        card.set_size_request(206, 350)
-        img = Gtk.Image(pixel_size=170)
-        img.set_size_request(170, 250)
-        pix = img_for_path(b["cover_path"], 170, 250)
+        card.set_size_request(182, 308)
+        img = Gtk.Image(pixel_size=138)
+        img.set_size_request(138, 204)
+        pix = img_for_path(b["cover_path"], 138, 204)
         if pix:
             img.set_from_pixbuf(pix)
         else:
@@ -801,7 +838,7 @@ class RedBookApp(Adw.Application):
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv)]:
+        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password)]:
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", fn)
             self.add_action(act)
@@ -810,7 +847,38 @@ class RedBookApp(Adw.Application):
         win = self.props.active_window
         if not win:
             win = MainWindow(self)
+            self._unlock_if_needed(win)
         win.present()
+
+    def _hash_password(self, text):
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+    def _ask_password(self, parent, title, callback):
+        dialog = Adw.Window(transient_for=parent, modal=True, title=title)
+        dialog.set_default_size(360, 120)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        row = Adw.PasswordEntryRow(title="Password")
+        box.append(row)
+        btn = Gtk.Button(label="Confirm")
+        btn.add_css_class("suggested-action")
+        box.append(btn)
+        dialog.set_content(box)
+        btn.connect("clicked", lambda *_: (callback(row.get_text().strip()), dialog.close()))
+        dialog.present()
+
+    def _unlock_if_needed(self, win):
+        pw_hash = win.db.get_setting("lock_password_hash")
+        if not pw_hash:
+            return
+        win.set_sensitive(False)
+        def check(pw):
+            if self._hash_password(pw) == pw_hash:
+                win.set_sensitive(True)
+                win.toast.add_toast(Adw.Toast(title="Unlocked"))
+            else:
+                win.toast.add_toast(Adw.Toast(title="Wrong password"))
+                self._unlock_if_needed(win)
+        self._ask_password(win, "Unlock RedBook", check)
 
     def backup(self, *_):
         w = self.props.active_window
@@ -827,6 +895,21 @@ class RedBookApp(Adw.Application):
     def export_csv(self, *_):
         w = self.props.active_window
         w.choose_save("Export CSV", f"redbook-{date.today().isoformat()}.csv", lambda p: (w.db.export_csv(p), w.toast.add_toast(Adw.Toast(title="CSV exported"))))
+
+    def set_password(self, *_):
+        w = self.props.active_window
+        def save_pw(pw):
+            if len(pw) < 4:
+                w.toast.add_toast(Adw.Toast(title="Password must be at least 4 chars"))
+                return
+            w.db.set_setting("lock_password_hash", self._hash_password(pw))
+            w.toast.add_toast(Adw.Toast(title="Password saved"))
+        self._ask_password(w, "Set App Password", save_pw)
+
+    def lock_app(self, *_):
+        w = self.props.active_window
+        w.set_sensitive(False)
+        self._unlock_if_needed(w)
 
 def main():
     return RedBookApp().run(None)
