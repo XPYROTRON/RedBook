@@ -289,7 +289,7 @@ def fetch_goodreads_data(title, author=""):
         rating = max(0, min(5, round(float(m.group(1))))) if m else None
         cm = re.search(r'<img[^>]+class="bookCover"[^>]+src="([^"]+)"', r.text) or re.search(r'"image"\s*:\s*"([^"]+)"', r.text)
         cover_url = cm.group(1).replace("\\/", "/") if cm else ""
-        return {"rating": rating, "cover_url": cover_url}
+        return {"rating": rating, "cover_url": cover_url, "source": "Goodreads"}
     except Exception:
         return {}
 
@@ -477,7 +477,7 @@ class BookEditor(Adw.Window):
             if cover:
                 self.cover_path = cover
                 self.refresh_cover()
-                self.toast.add_toast(Adw.Toast(title="Metadata loaded (OpenLibrary + Goodreads rating)"))
+                self.toast.add_toast(Adw.Toast(title="Metadata loaded (Goodreads cover/rating + Open Library details)"))
             else:
                 self.toast.add_toast(Adw.Toast(title="Metadata loaded; no cover found"))
         except Exception as e:
@@ -693,9 +693,10 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(self.search)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
-        self.dashboard.set_min_children_per_line(6)
-        self.dashboard.set_max_children_per_line(6)
+        self.dashboard.set_min_children_per_line(1)
+        self.dashboard.set_max_children_per_line(12)
         self.dashboard.set_homogeneous(True)
+        self.dashboard.set_hexpand(True)
         content.append(self.dashboard)
 
         lib_title = Gtk.Label(label="Library", xalign=0)
@@ -703,11 +704,13 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(lib_title)
 
         self.flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=14, row_spacing=14)
-        self.flow.set_min_children_per_line(2)
-        self.flow.set_max_children_per_line(7)
+        self.flow.set_min_children_per_line(1)
+        self.flow.set_max_children_per_line(12)
         self.flow.set_homogeneous(True)
+        self.flow.set_hexpand(True)
         sc = Gtk.ScrolledWindow()
         sc.set_child(self.flow)
+        sc.set_hexpand(True)
         sc.set_vexpand(True)
         content.append(sc)
         self.refresh_all()
@@ -799,12 +802,11 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_size_request(188, 314)
+        btn.set_hexpand(True)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
         card.add_css_class("view")
-        card.set_size_request(182, 308)
         img = Gtk.Image(pixel_size=138)
         img.set_size_request(138, 204)
         pix = img_for_path(b["cover_path"], 138, 204)
