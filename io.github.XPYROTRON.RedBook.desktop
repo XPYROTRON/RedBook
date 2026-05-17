@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=RedBook
+GenericName=Book Tracker
+Comment=Track books, shelves, metadata, covers, and finished dates
+Exec=redbook
+Icon=io.github.XPYROTRON.RedBook
+Terminal=false
+Categories=Office;Education;GTK;
+Keywords=Books;Reading;Library;Tracker;Adwaita;Memento;
+StartupNotify=true

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.XPYROTRON.RedBook</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>RedBook</name>
+  <summary>Modern Adwaita book tracker and reading library</summary>
+  <description>
+    <p>RedBook tracks books you own, want to read, are reading, and have finished. It provides Memento-inspired shelves, dashboard stats, cover cards, metadata lookup, detail pages, backups, restore, and CSV export.</p>
+  </description>
+  <launchable type="desktop-id">io.github.XPYROTRON.RedBook.desktop</launchable>
+  <developer_name>XPYROTRON</developer_name>
+  <categories>
+    <category>Office</category>
+    <category>Education</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.5.0" date="2026-05-17" />
+  </releases>
+</component>
