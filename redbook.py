@@ -62,6 +62,7 @@ class Database:
             title TEXT NOT NULL,
             author TEXT DEFAULT '',
             isbn TEXT DEFAULT '',
+            asin TEXT DEFAULT '',
             shelf TEXT DEFAULT 'Want to Read',
             series TEXT DEFAULT '',
             language TEXT DEFAULT '',
@@ -71,6 +72,7 @@ class Database:
             cover_path TEXT DEFAULT '',
             rating INTEGER DEFAULT 0,
             tags TEXT DEFAULT '',
+            categories TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             start_date TEXT DEFAULT '',
             finished_date TEXT DEFAULT '',
@@ -87,7 +89,7 @@ class Database:
         )
         """)
         columns = [r["name"] for r in self.conn.execute("PRAGMA table_info(books)").fetchall()]
-        for col in ["first_publish_year", "openlibrary_key"]:
+        for col in ["first_publish_year", "openlibrary_key", "asin", "categories"]:
             if col not in columns:
                 self.conn.execute(f"ALTER TABLE books ADD COLUMN {col} TEXT DEFAULT ''")
         self.conn.commit()
@@ -106,8 +108,8 @@ class Database:
             clauses.append("shelf=?"); params.append(shelf)
         if text:
             q = f"%{text}%"
-            clauses.append("(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR tags LIKE ? OR series LIKE ? OR publisher LIKE ?)")
-            params += [q, q, q, q, q, q]
+            clauses.append("(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR asin LIKE ? OR tags LIKE ? OR categories LIKE ? OR series LIKE ? OR publisher LIKE ?)")
+            params += [q, q, q, q, q, q, q, q]
         sql = "SELECT * FROM books"
         if clauses: sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY updated_at DESC, title COLLATE NOCASE"
@@ -125,7 +127,7 @@ class Database:
 
     def save(self, data, book_id=None):
         now = datetime.now().isoformat(timespec="seconds")
-        fields = ["title","author","isbn","shelf","series","language","publisher","page_count","description","cover_path","rating","tags","notes","start_date","finished_date","first_publish_year","openlibrary_key"]
+        fields = ["title","author","isbn","asin","shelf","series","language","publisher","page_count","description","cover_path","rating","tags","categories","notes","start_date","finished_date","first_publish_year","openlibrary_key"]
         payload = {k: data.get(k, "") for k in fields}
         payload["page_count"] = int(payload["page_count"] or 0)
         payload["rating"] = int(payload["rating"] or 0)
@@ -200,7 +202,9 @@ def fetch_metadata(query):
     query = query.strip()
     if not query:
         raise RuntimeError("Enter a title or ISBN.")
-    isbn_like = query.replace("-", "").replace(" ", "").isdigit()
+    compact = query.replace("-", "").replace(" ", "")
+    isbn_like = compact.isdigit()
+    asin_like = len(compact) == 10 and compact.isalnum()
     if isbn_like:
         r = requests.get(f"https://openlibrary.org/isbn/{urllib.parse.quote(query)}.json", timeout=15)
         if r.status_code != 200: raise RuntimeError("No Open Library ISBN result found.")
@@ -221,6 +225,28 @@ def fetch_metadata(query):
             "openlibrary_key": d.get("works", [{}])[0].get("key","") if d.get("works") else "",
             "cover_url": f"https://covers.openlibrary.org/b/id/{cover}-L.jpg" if cover else f"https://covers.openlibrary.org/b/isbn/{urllib.parse.quote(query)}-L.jpg"
         }
+    if asin_like:
+        r = requests.get("https://www.googleapis.com/books/v1/volumes?" + urllib.parse.urlencode({"q": f"asin:{compact}", "maxResults": 1}), timeout=15)
+        if r.status_code == 200:
+            items = r.json().get("items", [])
+            if items:
+                info = items[0].get("volumeInfo", {})
+                ids = {i.get("type"): i.get("identifier") for i in info.get("industryIdentifiers", [])}
+                image_links = info.get("imageLinks", {})
+                return {
+                    "title": info.get("title", ""),
+                    "author": ", ".join(info.get("authors", [])[:4]),
+                    "isbn": ids.get("ISBN_13") or ids.get("ISBN_10") or "",
+                    "asin": compact,
+                    "publisher": info.get("publisher", ""),
+                    "page_count": info.get("pageCount", 0) or 0,
+                    "description": info.get("description", ""),
+                    "first_publish_year": info.get("publishedDate", ""),
+                    "categories": ", ".join(info.get("categories", [])[:6]),
+                    "openlibrary_key": "",
+                    "cover_url": image_links.get("thumbnail", "").replace("http://", "https://"),
+                }
+        raise RuntimeError("No ASIN metadata found.")
     r = requests.get("https://openlibrary.org/search.json?" + urllib.parse.urlencode({"q": query, "limit": 1}), timeout=15)
     if r.status_code != 200: raise RuntimeError("Open Library search failed.")
     docs = r.json().get("docs", [])
@@ -242,6 +268,8 @@ def fetch_metadata(query):
         "publisher": d.get("publisher", [""])[0] if d.get("publisher") else "",
         "page_count": d.get("number_of_pages_median", 0) or 0,
         "description": desc,
+        "asin": "",
+        "categories": ", ".join(d.get("subject", [])[:8]) if d.get("subject") else "",
         "first_publish_year": str(d.get("first_publish_year","") or ""),
         "openlibrary_key": work_key,
         "cover_url": f"https://covers.openlibrary.org/b/id/{cover}-L.jpg" if cover else "",
@@ -261,7 +289,7 @@ def fetch_goodreads_data(title, author=""):
         rating = max(0, min(5, round(float(m.group(1))))) if m else None
         cm = re.search(r'<img[^>]+class="bookCover"[^>]+src="([^"]+)"', r.text) or re.search(r'"image"\s*:\s*"([^"]+)"', r.text)
         cover_url = cm.group(1).replace("\\/", "/") if cm else ""
-        return {"rating": rating, "cover_url": cover_url}
+        return {"rating": rating, "cover_url": cover_url, "source": "Goodreads"}
     except Exception:
         return {}
 
@@ -344,13 +372,15 @@ class BookEditor(Adw.Window):
         self.title = Adw.EntryRow(title="Title")
         self.author = Adw.EntryRow(title="Author")
         self.isbn = Adw.EntryRow(title="ISBN or search term")
+        self.asin = Adw.EntryRow(title="ASIN")
         self.series = Adw.EntryRow(title="Series")
         self.language = Adw.EntryRow(title="Language")
         self.publisher = Adw.EntryRow(title="Publisher")
         self.pages = Adw.EntryRow(title="Page Count")
         self.year = Adw.EntryRow(title="First Published / Publish Date")
         self.tags = Adw.EntryRow(title="Tags")
-        for row in [self.title, self.author, self.isbn, self.series, self.language, self.publisher, self.pages, self.year, self.tags]:
+        self.categories = Adw.EntryRow(title="Categories")
+        for row in [self.title, self.author, self.isbn, self.asin, self.series, self.language, self.publisher, self.pages, self.year, self.tags, self.categories]:
             basic.add(row)
         form_col.append(basic)
 
@@ -414,7 +444,7 @@ class BookEditor(Adw.Window):
         mapping = [
             ("title","title"),("author","author"),("isbn","isbn"),("series","series"),
             ("language","language"),("publisher","publisher"),("pages","page_count"),
-            ("year","first_publish_year"),("tags","tags"),("start_date","start_date"),
+            ("year","first_publish_year"),("tags","tags"),("categories","categories"),("asin","asin"),("start_date","start_date"),
             ("finished_date","finished_date")
         ]
         for attr, col in mapping:
@@ -431,7 +461,7 @@ class BookEditor(Adw.Window):
             meta = fetch_metadata(q)
             for k, widget in [
                 ("title", self.title), ("author", self.author), ("isbn", self.isbn),
-                ("publisher", self.publisher), ("first_publish_year", self.year)
+                ("asin", self.asin), ("categories", self.categories), ("publisher", self.publisher), ("first_publish_year", self.year)
             ]:
                 if meta.get(k):
                     widget.set_text(str(meta[k]))
@@ -447,7 +477,7 @@ class BookEditor(Adw.Window):
             if cover:
                 self.cover_path = cover
                 self.refresh_cover()
-                self.toast.add_toast(Adw.Toast(title="Metadata loaded (OpenLibrary + Goodreads rating)"))
+                self.toast.add_toast(Adw.Toast(title="Metadata loaded (Goodreads cover/rating + Open Library details)"))
             else:
                 self.toast.add_toast(Adw.Toast(title="Metadata loaded; no cover found"))
         except Exception as e:
@@ -461,6 +491,7 @@ class BookEditor(Adw.Window):
             "title": self.title.get_text().strip(),
             "author": self.author.get_text().strip(),
             "isbn": self.isbn.get_text().strip(),
+            "asin": self.asin.get_text().strip(),
             "shelf": SHELF_NAMES[self.shelf.get_selected()],
             "series": self.series.get_text().strip(),
             "language": self.language.get_text().strip(),
@@ -470,6 +501,7 @@ class BookEditor(Adw.Window):
             "cover_path": self.cover_path,
             "rating": self.rating.get_selected(),
             "tags": self.tags.get_text().strip(),
+            "categories": self.categories.get_text().strip(),
             "notes": self.tv_get(self.notes),
             "start_date": self.start_date.get_text().strip(),
             "finished_date": self.finished_date.get_text().strip(),
@@ -559,15 +591,19 @@ class DetailPage(Adw.Window):
         left.append(self.label(f"{b['shelf']}  ·  {stars}", "dim-label"))
 
         meta = []
-        for label, col in [("Series", "series"), ("Publisher", "publisher"), ("Published", "first_publish_year"), ("Language", "language"), ("Pages", "page_count"), ("ISBN", "isbn"), ("Started", "start_date"), ("Finished", "finished_date")]:
+        for label, col in [("Series", "series"), ("Publisher", "publisher"), ("Published", "first_publish_year"), ("Language", "language"), ("Pages", "page_count"), ("ISBN", "isbn"), ("ASIN", "asin"), ("Started", "start_date"), ("Finished", "finished_date")]:
             val = b[col]
             if val:
                 meta.append(f"<b>{html.escape(label)}:</b> {html.escape(str(val))}")
         ml = Gtk.Label(xalign=0, wrap=True, use_markup=True, selectable=True)
         ml.set_markup("\n".join(meta) if meta else "No metadata yet.")
         left.append(ml)
-        if b["tags"]:
-            left.append(self.label("Tags: " + b["tags"], "dim-label"))
+        for title, value in [("Categories", b["categories"]), ("Tags", b["tags"])]:
+            if value:
+                exp = Gtk.Expander(label=title)
+                exp.set_expanded(False)
+                exp.set_child(self.label(value, "dim-label"))
+                left.append(exp)
 
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18, margin_top=24, margin_bottom=24, margin_start=24, margin_end=24)
         right.set_vexpand(True)
@@ -652,14 +688,15 @@ class MainWindow(Adw.ApplicationWindow):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin_top=16, margin_bottom=16, margin_start=18, margin_end=18)
         self.paned.set_end_child(content)
 
-        self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN, tags, series")
+        self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN/ASIN, tags, categories, series")
         self.search.connect("search-changed", lambda *_: self.refresh_library())
         content.append(self.search)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
-        self.dashboard.set_min_children_per_line(6)
-        self.dashboard.set_max_children_per_line(6)
+        self.dashboard.set_min_children_per_line(1)
+        self.dashboard.set_max_children_per_line(12)
         self.dashboard.set_homogeneous(True)
+        self.dashboard.set_hexpand(True)
         content.append(self.dashboard)
 
         lib_title = Gtk.Label(label="Library", xalign=0)
@@ -667,11 +704,13 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(lib_title)
 
         self.flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=14, row_spacing=14)
-        self.flow.set_min_children_per_line(2)
-        self.flow.set_max_children_per_line(7)
+        self.flow.set_min_children_per_line(1)
+        self.flow.set_max_children_per_line(12)
         self.flow.set_homogeneous(True)
+        self.flow.set_hexpand(True)
         sc = Gtk.ScrolledWindow()
         sc.set_child(self.flow)
+        sc.set_hexpand(True)
         sc.set_vexpand(True)
         content.append(sc)
         self.refresh_all()
@@ -763,12 +802,11 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_size_request(188, 314)
+        btn.set_hexpand(True)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
         card.add_css_class("view")
-        card.set_size_request(182, 308)
         img = Gtk.Image(pixel_size=138)
         img.set_size_request(138, 204)
         pix = img_for_path(b["cover_path"], 138, 204)
