@@ -32,5 +32,5 @@ RedBook is a desktop library manager for Linux (GTK4 + Libadwaita) that helps yo
 Install:
 
 ```bash
-sudo apt install ./redbook_0.5.0_all.deb
+sudo apt install ./redbook_0.6.0_all.deb
 ```
