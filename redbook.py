@@ -14,6 +14,7 @@ except Exception:
 
 APP_ID = "io.github.XPYROTRON.RedBook"
 APP_NAME = "RedBook"
+APP_VERSION = "0.5.0"
 DATA_DIR = Path.home() / ".local" / "share" / "redbook"
 COVER_DIR = DATA_DIR / "covers"
 DB_PATH = DATA_DIR / "redbook.sqlite3"
@@ -670,6 +671,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Lock App", "app.lock")
         menu.append("Set/Change Password", "app.setpassword")
         menu.append("Disable Password Lock", "app.disablepassword")
+        menu.append("About RedBook", "app.about")
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
 
@@ -697,6 +699,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN/ASIN, tags, categories, series")
         self.search.connect("search-changed", lambda *_: self.refresh_library())
         self.search.set_visible(False)
+        content.append(self.search)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
         self.dashboard.set_min_children_per_line(1)
@@ -712,7 +715,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=14, row_spacing=14)
         self.flow.set_min_children_per_line(1)
         self.flow.set_max_children_per_line(12)
-        self.flow.set_homogeneous(True)
+        self.flow.set_homogeneous(False)
         self.flow.set_hexpand(True)
         sc = Gtk.ScrolledWindow()
         sc.set_child(self.flow)
@@ -907,7 +910,7 @@ class RedBookApp(Adw.Application):
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password), ("disablepassword", self.disable_password)]:
+        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password), ("disablepassword", self.disable_password), ("about", self.show_about)]:
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", fn)
             self.add_action(act)
@@ -979,6 +982,25 @@ class RedBookApp(Adw.Application):
         w = self.props.active_window
         w.set_sensitive(False)
         self._unlock_if_needed(w)
+
+
+    def show_about(self, *_):
+        w = self.props.active_window
+        about = Adw.AboutWindow(
+            transient_for=w,
+            application_name=APP_NAME,
+            application_icon=APP_ID,
+            version=APP_VERSION,
+            developer_name="XPYROTRON",
+            website="https://github.com/XPYROTRON/RedBook",
+            issue_url="https://github.com/XPYROTRON/RedBook/issues",
+            comments="A privacy-friendly personal bookshelf app for tracking reading, notes, and metadata.",
+            license_type=Gtk.License.GPL_3_0,
+        )
+        about.set_developers(["XPYROTRON"])
+        about.set_designers(["XPYROTRON"])
+        about.set_copyright("© XPYROTRON")
+        about.present()
 
     def disable_password(self, *_):
         w = self.props.active_window
