@@ -2,7 +2,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gio, GObject, GdkPixbuf, Gdk
+from gi.repository import Gtk, Adw, Gio, GObject, GdkPixbuf, Gdk, Pango
 import sqlite3, zipfile, json, csv, shutil, urllib.parse, html, hashlib
 from pathlib import Path
 from datetime import date, datetime
@@ -259,9 +259,9 @@ def fetch_metadata(query):
         if r.status_code == 200:
             items = r.json().get("items", [])
             if items:
-                info = items[0].get("volumeInfo", {})
-                ids = {i.get("type"): i.get("identifier") for i in info.get("industryIdentifiers", [])}
-                image_links = info.get("imageLinks", {})
+                info = items[0].get("volumeInfo") or {}
+                ids = {i.get("type"): i.get("identifier") for i in (info.get("industryIdentifiers") or []) if isinstance(i, dict)}
+                image_links = info.get("imageLinks") or {}
                 return {
                     "title": info.get("title", ""),
                     "author": ", ".join(info.get("authors", [])[:4]),
@@ -317,9 +317,9 @@ def fetch_metadata_fallback(query, compact=""):
             if gr.status_code == 200:
                 items = gr.json().get("items", [])
                 if items:
-                    info = items[0].get("volumeInfo", {})
-                    ids = {i.get("type"): i.get("identifier") for i in info.get("industryIdentifiers", [])}
-                    images = info.get("imageLinks", {})
+                    info = items[0].get("volumeInfo") or {}
+                    ids = {i.get("type"): i.get("identifier") for i in (info.get("industryIdentifiers") or []) if isinstance(i, dict)}
+                    images = info.get("imageLinks") or {}
                     google_data = {
                         "title": info.get("title", ""),
                         "author": ", ".join(info.get("authors", [])[:4]),
@@ -1085,7 +1085,8 @@ class MainWindow(Adw.ApplicationWindow):
         img.add_css_class("book-cover-frame")
         pix = img_for_path(b["cover_path"], GRID_COVER_WIDTH, GRID_COVER_HEIGHT)
         img.set_from_pixbuf(pix) if pix else img.set_from_icon_name("x-office-address-book-symbolic")
-        title = Gtk.Label(label=b["title"] or "Untitled", xalign=0, wrap=True, lines=2)
+        title = Gtk.Label(label=b["title"] or "Untitled", xalign=0, wrap=False, lines=1)
+        title.set_ellipsize(Pango.EllipsizeMode.END)
         title.add_css_class("book-title")
         author = Gtk.Label(label=b["author"] or "Unknown author", xalign=0, wrap=True, lines=1)
         author.add_css_class("dim-label")
