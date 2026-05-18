@@ -35,7 +35,7 @@ CSS = b"""
 .large-title { font-size: 24px; font-weight: 900; }
 .stat-number { font-size: 22px; font-weight: 900; }
 .stat-card { padding: 10px; border-radius: 16px; min-width: 130px; }
-.book-card { padding: 8px; border-radius: 18px; min-width: 170px; }
+.book-card { padding: 8px; border-radius: 18px; min-width: 0; }
 .book-title { font-weight: 800; font-size: 14px; }
 .stat-label { font-size: 12px; font-weight: 700; }
 .detail-title { font-size: 30px; font-weight: 900; }
@@ -657,6 +657,12 @@ class MainWindow(Adw.ApplicationWindow):
         add.connect("clicked", self.add_book)
         header.pack_end(add)
 
+        self.search_visible = False
+        self.search_toggle = Gtk.Button(icon_name="system-search-symbolic")
+        self.search_toggle.set_tooltip_text("Show search")
+        self.search_toggle.connect("clicked", self.toggle_search)
+        header.pack_end(self.search_toggle)
+
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic")
         menu = Gio.Menu()
         menu.append("Backup Library", "app.backup")
@@ -664,6 +670,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Export CSV", "app.exportcsv")
         menu.append("Lock App", "app.lock")
         menu.append("Set/Change Password", "app.setpassword")
+        menu.append("Disable Password Lock", "app.disablepassword")
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
 
@@ -690,7 +697,16 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN/ASIN, tags, categories, series")
         self.search.connect("search-changed", lambda *_: self.refresh_library())
-        content.append(self.search)
+        self.search_revealer = Gtk.Revealer()
+        self.search_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.search_revealer.set_reveal_child(False)
+        self.search_revealer.set_child(self.search)
+        content.append(self.search_revealer)
+        self.search.connect("activate", lambda *_: self.refresh_library())
+
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.add_controller(key_controller)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
         self.dashboard.set_min_children_per_line(1)
@@ -719,6 +735,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_visible = button.get_active()
         self.sidebar_sc.set_visible(self.sidebar_visible)
         self.paned.set_position(270 if self.sidebar_visible else 0)
+
+    def toggle_search(self, _button):
+        self.search_visible = not self.search_visible
+        self.search_revealer.set_reveal_child(self.search_visible)
+        self.search_toggle.set_tooltip_text("Hide search" if self.search_visible else "Show search")
+        if self.search_visible:
+            self.search.grab_focus()
+        else:
+            self.search.set_text("")
+            self.refresh_library()
+
+    def on_key_pressed(self, _controller, keyval, _keycode, state):
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK):
+            return False
+        ch = Gdk.keyval_to_unicode(keyval)
+        if ch and ch.isprintable() and not ch.isspace():
+            if not self.search_visible:
+                self.toggle_search(self.search_toggle)
+                self.search.set_text(ch)
+            else:
+                self.search.set_text(self.search.get_text() + ch)
+            self.search.set_position(-1)
+            self.search.grab_focus()
+            return True
+        return False
 
     def refresh_all(self):
         self.refresh_sidebar()
@@ -802,14 +843,14 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_hexpand(True)
+        btn.set_halign(Gtk.Align.START)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
         card.add_css_class("view")
-        img = Gtk.Image(pixel_size=138)
-        img.set_size_request(138, 204)
-        pix = img_for_path(b["cover_path"], 138, 204)
+        img = Gtk.Image(pixel_size=160)
+        img.set_size_request(160, 190)
+        pix = img_for_path(b["cover_path"], 160, 190)
         if pix:
             img.set_from_pixbuf(pix)
         else:
@@ -876,7 +917,7 @@ class RedBookApp(Adw.Application):
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password)]:
+        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password), ("disablepassword", self.disable_password)]:
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", fn)
             self.add_action(act)
@@ -948,6 +989,14 @@ class RedBookApp(Adw.Application):
         w = self.props.active_window
         w.set_sensitive(False)
         self._unlock_if_needed(w)
+
+    def disable_password(self, *_):
+        w = self.props.active_window
+        if not w.db.get_setting("lock_password_hash"):
+            w.toast.add_toast(Adw.Toast(title="Password lock is already disabled"))
+            return
+        w.db.set_setting("lock_password_hash", "")
+        w.toast.add_toast(Adw.Toast(title="Password lock disabled"))
 
 def main():
     return RedBookApp().run(None)
