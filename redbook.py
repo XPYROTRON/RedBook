@@ -35,7 +35,7 @@ CSS = b"""
 .large-title { font-size: 24px; font-weight: 900; }
 .stat-number { font-size: 22px; font-weight: 900; }
 .stat-card { padding: 10px; border-radius: 16px; min-width: 130px; }
-.book-card { padding: 8px; border-radius: 18px; min-width: 170px; }
+.book-card { padding: 8px; border-radius: 18px; }
 .book-title { font-weight: 800; font-size: 14px; }
 .stat-label { font-size: 12px; font-weight: 700; }
 .detail-title { font-size: 30px; font-weight: 900; }
@@ -657,10 +657,9 @@ class MainWindow(Adw.ApplicationWindow):
         add.connect("clicked", self.add_book)
         header.pack_end(add)
 
-        self.search_visible = False
-        self.search_toggle = Gtk.Button(icon_name="system-search-symbolic")
+        self.search_toggle = Gtk.ToggleButton(icon_name="system-search-symbolic")
         self.search_toggle.set_tooltip_text("Show search")
-        self.search_toggle.connect("clicked", self.toggle_search)
+        self.search_toggle.connect("toggled", self.toggle_search)
         header.pack_end(self.search_toggle)
 
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic")
@@ -698,12 +697,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN/ASIN, tags, categories, series")
         self.search.connect("search-changed", lambda *_: self.refresh_library())
         self.search.set_visible(False)
-        content.append(self.search)
-        self.search.connect("activate", lambda *_: self.refresh_library())
-
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", self.on_key_pressed)
-        self.add_controller(key_controller)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
         self.dashboard.set_min_children_per_line(1)
@@ -733,11 +726,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_sc.set_visible(self.sidebar_visible)
         self.paned.set_position(270 if self.sidebar_visible else 0)
 
-    def toggle_search(self, _button):
-        self.search_visible = not self.search_visible
-        self.search.set_visible(self.search_visible)
-        self.search_toggle.set_tooltip_text("Hide search" if self.search_visible else "Show search")
-        if self.search_visible:
+    def toggle_search(self, button):
+        active = button.get_active()
+        self.search.set_visible(active)
+        button.set_tooltip_text("Hide search" if active else "Show search")
+        if active:
             self.search.grab_focus()
         else:
             self.search.set_text("")
@@ -749,7 +742,7 @@ class MainWindow(Adw.ApplicationWindow):
         ch = Gdk.keyval_to_unicode(keyval)
         if ch and ch.isprintable() and not ch.isspace():
             if not self.search.get_visible():
-                self.toggle_search(self.search_toggle)
+                self.search_toggle.set_active(True)
                 self.search.set_text(ch)
             else:
                 self.search.set_text(self.search.get_text() + ch)
@@ -840,7 +833,7 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_hexpand(True)
+        btn.set_halign(Gtk.Align.START)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
