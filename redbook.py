@@ -43,7 +43,15 @@ CSS = b"""
 .section-title { font-size: 18px; font-weight: 800; }
 .editor-cover-box { padding: 14px; border-radius: 20px; }
 .editor-heading { font-size: 24px; font-weight: 900; }
+.book-cover-frame { min-width: 160px; min-height: 240px; padding: 8px; border-radius: 14px; }
 """
+
+GRID_COVER_WIDTH = 160
+GRID_COVER_HEIGHT = 240
+EDITOR_COVER_WIDTH = 240
+EDITOR_COVER_HEIGHT = 360
+DETAIL_COVER_WIDTH = 300
+DETAIL_COVER_HEIGHT = 450
 
 def ensure_dirs():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -358,6 +366,28 @@ def fetch_goodreads_data(title, author=""):
     except Exception:
         return {}
 
+def search_book_suggestions(query, limit=8):
+    if not requests or not query.strip():
+        return []
+    try:
+        r = requests.get("https://openlibrary.org/search.json?" + urllib.parse.urlencode({"q": query.strip(), "limit": limit}), timeout=15)
+        if r.status_code != 200:
+            return []
+        docs = r.json().get("docs", [])
+        out = []
+        for d in docs:
+            cover = d.get("cover_i")
+            out.append({
+                "title": d.get("title", ""),
+                "author": ", ".join(d.get("author_name", [])[:3]) or "Unknown author",
+                "isbn": d.get("isbn", [""])[0] if d.get("isbn") else "",
+                "openlibrary_key": d.get("key", ""),
+                "cover_url": f"https://covers.openlibrary.org/b/id/{cover}-M.jpg" if cover else "",
+            })
+        return [s for s in out if s.get("title")]
+    except Exception:
+        return []
+
 def img_for_path(path, w, h):
     if path and Path(path).exists():
         try:
@@ -389,6 +419,10 @@ class BookEditor(Adw.Window):
         save.add_css_class("suggested-action")
         save.connect("clicked", self.save)
         header.pack_start(load)
+        refresh_meta = Gtk.Button(label="Refresh Metadata")
+        refresh_meta.set_icon_name("view-refresh-symbolic")
+        refresh_meta.connect("clicked", self.refresh_metadata)
+        header.pack_start(refresh_meta)
         header.pack_end(save)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -420,12 +454,17 @@ class BookEditor(Adw.Window):
         cover_box.add_css_class("view")
         cover_box.set_valign(Gtk.Align.START)
         self.cover = Gtk.Image(pixel_size=240)
-        self.cover.set_size_request(240, 350)
+        self.cover.set_size_request(EDITOR_COVER_WIDTH, EDITOR_COVER_HEIGHT)
+        self.cover.add_css_class("book-cover-frame")
         cover_box.append(self.cover)
         hint = Gtk.Label(label="Cover is downloaded automatically when metadata is loaded.", wrap=True, xalign=0)
         hint.add_css_class("dim-label")
         hint.set_size_request(240, -1)
         cover_box.append(hint)
+        cover_btn = Gtk.Button(label="Use Local Cover Image")
+        cover_btn.set_icon_name("image-x-generic-symbolic")
+        cover_btn.connect("clicked", self.choose_local_cover)
+        cover_box.append(cover_btn)
         hero.append(cover_box)
 
         form_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -447,7 +486,17 @@ class BookEditor(Adw.Window):
         self.categories = Adw.EntryRow(title="Categories")
         for row in [self.title, self.author, self.isbn, self.asin, self.series, self.language, self.publisher, self.pages, self.year, self.tags, self.categories]:
             basic.add(row)
+        suggest_btn = Gtk.Button(label="Search Databases")
+        suggest_btn.set_icon_name("system-search-symbolic")
+        suggest_btn.connect("clicked", self.search_suggestions)
+        basic.add(suggest_btn)
         form_col.append(basic)
+
+        suggest_group = Adw.PreferencesGroup(title="Suggestions")
+        self.suggestion_list = Gtk.ListBox()
+        self.suggestion_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        suggest_group.add(self.suggestion_list)
+        form_col.append(suggest_group)
 
         status = Adw.PreferencesGroup(title="Reading status")
         self.shelf = Adw.ComboRow(title="Shelf", model=Gtk.StringList.new(SHELF_NAMES))
@@ -499,7 +548,7 @@ class BookEditor(Adw.Window):
         tv.get_buffer().set_text(text or "")
 
     def refresh_cover(self):
-        pix = img_for_path(self.cover_path, 240, 350)
+        pix = img_for_path(self.cover_path, EDITOR_COVER_WIDTH, EDITOR_COVER_HEIGHT)
         if pix:
             self.cover.set_from_pixbuf(pix)
         else:
@@ -547,6 +596,72 @@ class BookEditor(Adw.Window):
                 self.toast.add_toast(Adw.Toast(title="Metadata loaded; no cover found"))
         except Exception as e:
             self.toast.add_toast(Adw.Toast(title=str(e)))
+
+    def refresh_metadata(self, *_):
+        self.lookup()
+
+    def choose_local_cover(self, *_):
+        dialog = Gtk.FileDialog(title="Choose Cover Image")
+        dialog.open(self, None, self._cover_chosen)
+
+    def _cover_chosen(self, dialog, result):
+        try:
+            f = dialog.open_finish(result)
+            if not f:
+                return
+            src = Path(f.get_path())
+            suffix = src.suffix.lower() or ".jpg"
+            dst = COVER_DIR / f"{safe_filename(self.title.get_text() or src.stem)}-{int(datetime.now().timestamp())}{suffix}"
+            shutil.copy2(src, dst)
+            self.cover_path = str(dst)
+            self.refresh_cover()
+            self.toast.add_toast(Adw.Toast(title="Local cover image applied"))
+        except Exception as e:
+            self.toast.add_toast(Adw.Toast(title=str(e)))
+
+    def search_suggestions(self, *_):
+        q = self.title.get_text().strip() or self.isbn.get_text().strip()
+        rows = search_book_suggestions(q)
+        while (child := self.suggestion_list.get_first_child()):
+            self.suggestion_list.remove(child)
+        if not rows:
+            row = Gtk.ListBoxRow()
+            row.set_child(Gtk.Label(label="No suggestions found.", xalign=0))
+            self.suggestion_list.append(row)
+            return
+        for item in rows:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            img = Gtk.Image(pixel_size=44)
+            pix = None
+            if item.get("cover_url"):
+                temp = download_cover(item["cover_url"], item["title"])
+                pix = img_for_path(temp, 44, 64) if temp else None
+            if pix:
+                img.set_from_pixbuf(pix)
+            else:
+                img.set_from_icon_name("x-office-address-book-symbolic")
+            box.append(img)
+            text = Gtk.Label(label=f"{item['title']}\n{item['author']}", xalign=0)
+            text.set_wrap(True)
+            box.append(text)
+            pick = Gtk.Button(label="Use")
+            pick.connect("clicked", lambda _b, it=item: self.apply_suggestion(it))
+            box.append(pick)
+            row.set_child(box)
+            self.suggestion_list.append(row)
+
+    def apply_suggestion(self, item):
+        self.title.set_text(item.get("title", ""))
+        self.author.set_text(item.get("author", ""))
+        if item.get("isbn"):
+            self.isbn.set_text(item["isbn"])
+        self.openlibrary_key = item.get("openlibrary_key", "")
+        if item.get("cover_url"):
+            cover = download_cover(item["cover_url"], item["title"] or "book")
+            if cover:
+                self.cover_path = cover
+                self.refresh_cover()
 
     def save(self, *_):
         if not self.title.get_text().strip():
@@ -641,9 +756,10 @@ class DetailPage(Adw.Window):
         left_sc.set_child(left)
         paned.set_start_child(left_sc)
 
-        pix = img_for_path(b["cover_path"], 300, 440)
-        img = Gtk.Image(pixel_size=300)
-        img.set_size_request(300, 440)
+        pix = img_for_path(b["cover_path"], DETAIL_COVER_WIDTH, DETAIL_COVER_HEIGHT)
+        img = Gtk.Image(pixel_size=DETAIL_COVER_WIDTH)
+        img.set_size_request(DETAIL_COVER_WIDTH, DETAIL_COVER_HEIGHT)
+        img.add_css_class("book-cover-frame")
         if pix:
             img.set_from_pixbuf(pix)
         else:
@@ -924,9 +1040,10 @@ class MainWindow(Adw.ApplicationWindow):
         card.set_valign(Gtk.Align.START)
         card.set_vexpand(False)
         card.set_size_request(176, -1)
-        img = Gtk.Image(pixel_size=160)
-        img.set_size_request(160, 190)
-        pix = img_for_path(b["cover_path"], 160, 190)
+        img = Gtk.Image(pixel_size=GRID_COVER_WIDTH)
+        img.set_size_request(GRID_COVER_WIDTH, GRID_COVER_HEIGHT)
+        img.add_css_class("book-cover-frame")
+        pix = img_for_path(b["cover_path"], GRID_COVER_WIDTH, GRID_COVER_HEIGHT)
         if pix:
             img.set_from_pixbuf(pix)
         else:
