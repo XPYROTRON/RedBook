@@ -35,7 +35,7 @@ CSS = b"""
 .large-title { font-size: 24px; font-weight: 900; }
 .stat-number { font-size: 22px; font-weight: 900; }
 .stat-card { padding: 10px; border-radius: 16px; min-width: 130px; }
-.book-card { padding: 8px; border-radius: 18px; min-width: 200px; }
+.book-card { padding: 8px; border-radius: 18px; }
 .book-title { font-weight: 800; font-size: 14px; }
 .stat-label { font-size: 12px; font-weight: 700; }
 .detail-title { font-size: 30px; font-weight: 900; }
@@ -697,12 +697,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN/ASIN, tags, categories, series")
         self.search.connect("search-changed", lambda *_: self.refresh_library())
         self.search.set_visible(False)
-        content.append(self.search)
-        self.search.connect("activate", lambda *_: self.refresh_library())
-
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", self.on_key_pressed)
-        self.add_controller(key_controller)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
         self.dashboard.set_min_children_per_line(1)
@@ -839,7 +833,7 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_hexpand(True)
+        btn.set_halign(Gtk.Align.START)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
