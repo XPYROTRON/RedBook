@@ -657,6 +657,11 @@ class MainWindow(Adw.ApplicationWindow):
         add.connect("clicked", self.add_book)
         header.pack_end(add)
 
+        self.search_toggle = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.search_toggle.set_tooltip_text("Show search")
+        self.search_toggle.connect("toggled", self.toggle_search)
+        header.pack_end(self.search_toggle)
+
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic")
         menu = Gio.Menu()
         menu.append("Backup Library", "app.backup")
@@ -720,6 +725,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_visible = button.get_active()
         self.sidebar_sc.set_visible(self.sidebar_visible)
         self.paned.set_position(270 if self.sidebar_visible else 0)
+
+    def toggle_search(self, button):
+        active = button.get_active()
+        self.search.set_visible(active)
+        button.set_tooltip_text("Hide search" if active else "Show search")
+        if active:
+            self.search.grab_focus()
+        else:
+            self.search.set_text("")
+            self.refresh_library()
+
+    def on_key_pressed(self, _controller, keyval, _keycode, state):
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK):
+            return False
+        ch = Gdk.keyval_to_unicode(keyval)
+        if ch and ch.isprintable() and not ch.isspace():
+            if not self.search.get_visible():
+                self.search_toggle.set_active(True)
+                self.search.set_text(ch)
+            else:
+                self.search.set_text(self.search.get_text() + ch)
+            self.search.set_position(-1)
+            self.search.grab_focus()
+            return True
+        return False
 
     def refresh_all(self):
         self.refresh_sidebar()
@@ -808,9 +838,9 @@ class MainWindow(Adw.ApplicationWindow):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
         card.add_css_class("view")
-        img = Gtk.Image(pixel_size=138)
-        img.set_size_request(138, 204)
-        pix = img_for_path(b["cover_path"], 138, 204)
+        img = Gtk.Image(pixel_size=160)
+        img.set_size_request(160, 190)
+        pix = img_for_path(b["cover_path"], 160, 190)
         if pix:
             img.set_from_pixbuf(pix)
         else:
