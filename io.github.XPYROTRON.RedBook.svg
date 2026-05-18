@@ -1,1 +1,16 @@
-PLACEHOLDER
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#7f1d1d"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="48" width="384" height="416" rx="40" fill="url(#g)"/>
+  <rect x="112" y="96" width="240" height="320" rx="20" fill="#fff7ed" opacity="0.95"/>
+  <rect x="144" y="144" width="176" height="20" rx="10" fill="#991b1b"/>
+  <rect x="144" y="192" width="144" height="16" rx="8" fill="#b91c1c" opacity="0.7"/>
+  <rect x="144" y="232" width="160" height="16" rx="8" fill="#b91c1c" opacity="0.55"/>
+  <circle cx="368" cy="368" r="56" fill="#22c55e" stroke="#ffffff" stroke-width="16"/>
+  <path d="M342 368l18 18 34-42" fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
