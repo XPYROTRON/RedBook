@@ -44,6 +44,10 @@ CSS = b"""
 .editor-cover-box { padding: 14px; border-radius: 20px; }
 .editor-heading { font-size: 24px; font-weight: 900; }
 .book-cover-frame { min-width: 160px; min-height: 240px; padding: 8px; border-radius: 14px; }
+.book-grid-card { min-width: 176px; }
+.book-list-card { min-width: 760px; }
+.book-list-title { font-weight: 800; font-size: 16px; }
+
 """
 
 GRID_COVER_WIDTH = 160
@@ -192,10 +196,26 @@ def clean_desc(v):
 def safe_filename(text):
     return "".join(c for c in text.lower().replace(" ", "-") if c.isalnum() or c in "-_")[:96] or "book"
 
+
+def normalize_cover_url(url):
+    if not url:
+        return ""
+    url = url.strip().replace("\\/", "/")
+    if url.startswith("//"):
+        url = "https:" + url
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    return url
+
 def download_cover(url, title):
-    if not url or not requests: return ""
+    if not url or not requests:
+        return ""
+    headers = {"User-Agent": "Mozilla/5.0 (RedBook)"}
+    normalized = normalize_cover_url(url)
+    if not normalized:
+        return ""
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(normalized, timeout=15, headers=headers)
         ctype = r.headers.get("content-type", "")
         if r.status_code == 200 and r.content and ("image" in ctype or len(r.content) > 1000):
             path = COVER_DIR / f"{safe_filename(title)}-{int(datetime.now().timestamp())}.jpg"
@@ -815,6 +835,7 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
         self.db = Database()
         self.current_shelf = "All"
+        self.view_mode = self.db.get_setting("view_mode", "shelf") or "shelf"
         self.sidebar_visible = True
         self.set_title(APP_NAME)
         self.set_default_size(1280, 820)
@@ -842,6 +863,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_toggle.set_tooltip_text("Show search")
         self.search_toggle.connect("toggled", self.toggle_search)
         header.pack_end(self.search_toggle)
+
+        self.view_toggle = Gtk.ToggleButton()
+        self.view_toggle.set_tooltip_text("Switch to list view")
+        self.view_toggle.set_icon_name("view-list-symbolic")
+        self.view_toggle.set_active(self.view_mode == "list")
+        self.view_toggle.connect("toggled", self.toggle_view_mode)
+        header.pack_end(self.view_toggle)
 
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic")
         menu = Gio.Menu()
@@ -923,6 +951,13 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.search.set_text("")
             self.refresh_library()
+
+    def toggle_view_mode(self, button):
+        self.view_mode = "list" if button.get_active() else "shelf"
+        button.set_icon_name("view-grid-symbolic" if self.view_mode == "list" else "view-list-symbolic")
+        button.set_tooltip_text("Switch to shelf view" if self.view_mode == "list" else "Switch to list view")
+        self.db.set_setting("view_mode", self.view_mode)
+        self.refresh_library()
 
     def on_window_size_changed(self, *_):
         width = self.get_width() or 1280
@@ -1018,6 +1053,10 @@ class MainWindow(Adw.ApplicationWindow):
     def refresh_library(self):
         while (child := self.flow.get_first_child()):
             self.flow.remove(child)
+        is_list = self.view_mode == "list"
+        self.flow.set_homogeneous(not is_list)
+        self.flow.set_max_children_per_line(1 if is_list else 12)
+        self.flow.set_min_children_per_line(1)
         books = self.db.books(self.search.get_text().strip(), self.current_shelf)
         if not books:
             empty = Gtk.Label(label="No books here yet. Click “Add Book” to start.", xalign=0)
@@ -1028,26 +1067,24 @@ class MainWindow(Adw.ApplicationWindow):
             self.flow.append(self.book_card(b))
 
     def book_card(self, b):
+        return self.book_list_row(b) if self.view_mode == "list" else self.book_shelf_card(b)
+
+    def book_shelf_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_halign(Gtk.Align.START)
+        btn.set_halign(Gtk.Align.FILL)
         btn.set_valign(Gtk.Align.START)
-        btn.set_vexpand(False)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
+        card.add_css_class("book-grid-card")
         card.add_css_class("view")
-        card.set_valign(Gtk.Align.START)
-        card.set_vexpand(False)
         card.set_size_request(176, -1)
         img = Gtk.Image(pixel_size=GRID_COVER_WIDTH)
         img.set_size_request(GRID_COVER_WIDTH, GRID_COVER_HEIGHT)
         img.add_css_class("book-cover-frame")
         pix = img_for_path(b["cover_path"], GRID_COVER_WIDTH, GRID_COVER_HEIGHT)
-        if pix:
-            img.set_from_pixbuf(pix)
-        else:
-            img.set_from_icon_name("x-office-address-book-symbolic")
+        img.set_from_pixbuf(pix) if pix else img.set_from_icon_name("x-office-address-book-symbolic")
         title = Gtk.Label(label=b["title"] or "Untitled", xalign=0, wrap=True, lines=2)
         title.add_css_class("book-title")
         author = Gtk.Label(label=b["author"] or "Unknown author", xalign=0, wrap=True, lines=1)
@@ -1060,11 +1097,46 @@ class MainWindow(Adw.ApplicationWindow):
             meta_text += " · " + ("★" * rating)
         meta = Gtk.Label(label=meta_text, xalign=0, wrap=True, lines=2)
         meta.add_css_class("caption")
-        card.append(img)
-        card.append(title)
-        card.append(author)
-        card.append(meta)
+        for w in (img, title, author, meta):
+            card.append(w)
         btn.set_child(card)
+        return btn
+
+    def book_list_row(self, b):
+        btn = Gtk.Button()
+        btn.add_css_class("flat")
+        btn.set_halign(Gtk.Align.FILL)
+        btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        row.add_css_class("book-card")
+        row.add_css_class("book-list-card")
+        row.add_css_class("view")
+        row.set_hexpand(True)
+        img = Gtk.Image(pixel_size=72)
+        img.set_size_request(72, 108)
+        img.add_css_class("book-cover-frame")
+        pix = img_for_path(b["cover_path"], 72, 108)
+        img.set_from_pixbuf(pix) if pix else img.set_from_icon_name("x-office-address-book-symbolic")
+        row.append(img)
+        text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        text_col.set_hexpand(True)
+        title = Gtk.Label(label=b["title"] or "Untitled", xalign=0, wrap=True, lines=2)
+        title.add_css_class("book-list-title")
+        author = Gtk.Label(label=b["author"] or "Unknown author", xalign=0, wrap=True, lines=1)
+        author.add_css_class("dim-label")
+        detail = f"{b['shelf']}"
+        if b["publisher"]:
+            detail += f" · {b['publisher']}"
+        if b["first_publish_year"]:
+            detail += f" · {b['first_publish_year']}"
+        rating = int(b["rating"] or 0)
+        if rating:
+            detail += " · " + ("★" * rating)
+        meta = Gtk.Label(label=detail, xalign=0, wrap=True, lines=2)
+        meta.add_css_class("caption")
+        text_col.append(title); text_col.append(author); text_col.append(meta)
+        row.append(text_col)
+        btn.set_child(row)
         return btn
 
     def open_detail(self, book_id):
