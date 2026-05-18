@@ -664,6 +664,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Export CSV", "app.exportcsv")
         menu.append("Lock App", "app.lock")
         menu.append("Set/Change Password", "app.setpassword")
+        menu.append("Disable Password Lock", "app.disablepassword")
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
 
@@ -876,7 +877,7 @@ class RedBookApp(Adw.Application):
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password)]:
+        for name, fn in [("backup", self.backup), ("restore", self.restore), ("exportcsv", self.export_csv), ("lock", self.lock_app), ("setpassword", self.set_password), ("disablepassword", self.disable_password)]:
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", fn)
             self.add_action(act)
@@ -948,6 +949,14 @@ class RedBookApp(Adw.Application):
         w = self.props.active_window
         w.set_sensitive(False)
         self._unlock_if_needed(w)
+
+    def disable_password(self, *_):
+        w = self.props.active_window
+        if not w.db.get_setting("lock_password_hash"):
+            w.toast.add_toast(Adw.Toast(title="Password lock is already disabled"))
+            return
+        w.db.set_setting("lock_password_hash", "")
+        w.toast.add_toast(Adw.Toast(title="Password lock disabled"))
 
 def main():
     return RedBookApp().run(None)
