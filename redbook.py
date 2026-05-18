@@ -35,7 +35,7 @@ CSS = b"""
 .large-title { font-size: 24px; font-weight: 900; }
 .stat-number { font-size: 22px; font-weight: 900; }
 .stat-card { padding: 10px; border-radius: 16px; min-width: 130px; }
-.book-card { padding: 8px; border-radius: 18px; min-width: 170px; }
+.book-card { padding: 8px; border-radius: 18px; }
 .book-title { font-weight: 800; font-size: 14px; }
 .stat-label { font-size: 12px; font-weight: 700; }
 .detail-title { font-size: 30px; font-weight: 900; }
@@ -802,7 +802,7 @@ class MainWindow(Adw.ApplicationWindow):
     def book_card(self, b):
         btn = Gtk.Button()
         btn.add_css_class("flat")
-        btn.set_hexpand(True)
+        btn.set_halign(Gtk.Align.START)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
