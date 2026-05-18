@@ -14,7 +14,7 @@ except Exception:
 
 APP_ID = "io.github.XPYROTRON.RedBook"
 APP_NAME = "RedBook"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 DATA_DIR = Path.home() / ".local" / "share" / "redbook"
 COVER_DIR = DATA_DIR / "covers"
 DB_PATH = DATA_DIR / "redbook.sqlite3"
@@ -251,7 +251,8 @@ def fetch_metadata(query):
     r = requests.get("https://openlibrary.org/search.json?" + urllib.parse.urlencode({"q": query, "limit": 1}), timeout=15)
     if r.status_code != 200: raise RuntimeError("Open Library search failed.")
     docs = r.json().get("docs", [])
-    if not docs: raise RuntimeError("No matching book found.")
+    if not docs:
+        return fetch_metadata_fallback(query, compact)
     d = docs[0]
     cover = d.get("cover_i")
     work_key = d.get("key", "")
@@ -275,6 +276,69 @@ def fetch_metadata(query):
         "openlibrary_key": work_key,
         "cover_url": f"https://covers.openlibrary.org/b/id/{cover}-L.jpg" if cover else "",
     }
+
+def fetch_metadata_fallback(query, compact=""):
+    google_data = {}
+    if requests:
+        try:
+            gq = f"isbn:{compact}" if compact and compact.isdigit() else query
+            gr = requests.get(
+                "https://www.googleapis.com/books/v1/volumes?" + urllib.parse.urlencode({"q": gq, "maxResults": 1}),
+                timeout=15
+            )
+            if gr.status_code == 200:
+                items = gr.json().get("items", [])
+                if items:
+                    info = items[0].get("volumeInfo", {})
+                    ids = {i.get("type"): i.get("identifier") for i in info.get("industryIdentifiers", [])}
+                    images = info.get("imageLinks", {})
+                    google_data = {
+                        "title": info.get("title", ""),
+                        "author": ", ".join(info.get("authors", [])[:4]),
+                        "isbn": ids.get("ISBN_13") or ids.get("ISBN_10") or compact,
+                        "publisher": info.get("publisher", ""),
+                        "page_count": info.get("pageCount", 0) or 0,
+                        "description": info.get("description", ""),
+                        "first_publish_year": info.get("publishedDate", ""),
+                        "categories": ", ".join(info.get("categories", [])[:6]),
+                        "cover_url": (images.get("thumbnail", "") or images.get("smallThumbnail", "")).replace("http://", "https://"),
+                    }
+        except Exception:
+            pass
+    if google_data:
+        return google_data
+    try:
+        ia = requests.get(
+            "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode({
+                "q": f'title:("{query}") AND mediatype:texts',
+                "fl[]": ["title", "creator", "date", "identifier"],
+                "rows": 1,
+                "page": 1,
+                "output": "json",
+            }, doseq=True),
+            timeout=15
+        )
+        if ia.status_code == 200:
+            docs = ia.json().get("response", {}).get("docs", [])
+            if docs:
+                doc = docs[0]
+                ident = doc.get("identifier", "")
+                year = str(doc.get("date", "") or "")[:10]
+                return {
+                    "title": doc.get("title", ""),
+                    "author": doc.get("creator", ""),
+                    "isbn": compact if compact.isdigit() else "",
+                    "publisher": "Internet Archive",
+                    "page_count": 0,
+                    "description": "",
+                    "first_publish_year": year,
+                    "categories": "",
+                    "cover_url": f"https://archive.org/services/img/{ident}" if ident else "",
+                    "openlibrary_key": "",
+                }
+    except Exception:
+        pass
+    raise RuntimeError("No matching book found in Open Library, Google Books, or Internet Archive.")
 
 def fetch_goodreads_data(title, author=""):
     if not requests or not title.strip():
@@ -683,6 +747,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.paned.set_vexpand(True)
         root.append(self.paned)
         self.toast.set_child(root)
+        self.connect("notify::default-width", self.on_window_size_changed)
+        self.connect("notify::default-height", self.on_window_size_changed)
+        self.connect("notify::maximized", self.on_window_size_changed)
+        self.connect("notify::fullscreened", self.on_window_size_changed)
 
         self.sidebar_sc = Gtk.ScrolledWindow()
         self.sidebar_sc.set_size_request(260, -1)
@@ -723,6 +791,7 @@ class MainWindow(Adw.ApplicationWindow):
         sc.set_vexpand(True)
         content.append(sc)
         self.refresh_all()
+        self.on_window_size_changed()
 
     def toggle_sidebar(self, button):
         self.sidebar_visible = button.get_active()
@@ -738,6 +807,15 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.search.set_text("")
             self.refresh_library()
+
+    def on_window_size_changed(self, *_):
+        width = self.get_width() or 1280
+        should_show_sidebar = width >= 980
+        if should_show_sidebar != self.sidebar_visible:
+            self.sidebar_visible = should_show_sidebar
+            self.sidebar_btn.set_active(should_show_sidebar)
+            self.sidebar_sc.set_visible(should_show_sidebar)
+            self.paned.set_position(270 if should_show_sidebar else 0)
 
     def on_key_pressed(self, _controller, keyval, _keycode, state):
         if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK):
@@ -837,10 +915,15 @@ class MainWindow(Adw.ApplicationWindow):
         btn = Gtk.Button()
         btn.add_css_class("flat")
         btn.set_halign(Gtk.Align.START)
+        btn.set_valign(Gtk.Align.START)
+        btn.set_vexpand(False)
         btn.connect("clicked", lambda *_: self.open_detail(b["id"]))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         card.add_css_class("book-card")
         card.add_css_class("view")
+        card.set_valign(Gtk.Align.START)
+        card.set_vexpand(False)
+        card.set_size_request(176, -1)
         img = Gtk.Image(pixel_size=160)
         img.set_size_request(160, 190)
         pix = img_for_path(b["cover_path"], 160, 190)
