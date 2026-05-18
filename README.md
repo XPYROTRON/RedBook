@@ -18,6 +18,7 @@ RedBook is a desktop library manager for Linux (GTK4 + Libadwaita) that helps yo
 - Collapsible sidebar and responsive card grid.
 - Password lock support:
   - set/change app password
+  - disable password lock from the app menu
   - lock the app from the menu
   - unlock required when a password exists
 - Metadata auto-load:
