@@ -816,20 +816,8 @@ class MainWindow(Adw.ApplicationWindow):
             img.set_from_icon_name("x-office-address-book-symbolic")
         title = Gtk.Label(label=b["title"] or "Untitled", xalign=0, wrap=True, lines=2)
         title.add_css_class("book-title")
-        author = Gtk.Label(label=b["author"] or "Unknown author", xalign=0, wrap=True, lines=1)
-        author.add_css_class("dim-label")
-        meta_text = b["shelf"]
-        if b["finished_date"]:
-            meta_text += " · " + b["finished_date"]
-        rating = int(b["rating"] or 0)
-        if rating:
-            meta_text += " · " + ("★" * rating)
-        meta = Gtk.Label(label=meta_text, xalign=0, wrap=True, lines=2)
-        meta.add_css_class("caption")
         card.append(img)
         card.append(title)
-        card.append(author)
-        card.append(meta)
         btn.set_child(card)
         return btn
 
