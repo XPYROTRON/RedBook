@@ -484,7 +484,14 @@ class BookEditor(Adw.Window):
         cover_btn = Gtk.Button(label="Use Local Cover Image")
         cover_btn.set_icon_name("image-x-generic-symbolic")
         cover_btn.connect("clicked", self.choose_local_cover)
-        cover_box.append(cover_btn)
+        lookup_btn = Gtk.Button(label="Online Lookup")
+        lookup_btn.set_icon_name("system-search-symbolic")
+        lookup_btn.connect("clicked", self.search_suggestions)
+        cover_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        cover_actions.set_margin_top(8)
+        cover_actions.append(cover_btn)
+        cover_actions.append(lookup_btn)
+        cover_box.append(cover_actions)
         hero.append(cover_box)
 
         form_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -506,10 +513,6 @@ class BookEditor(Adw.Window):
         self.categories = Adw.EntryRow(title="Categories")
         for row in [self.title, self.author, self.isbn, self.asin, self.series, self.language, self.publisher, self.pages, self.year, self.tags, self.categories]:
             basic.add(row)
-        suggest_btn = Gtk.Button(label="Search Databases")
-        suggest_btn.set_icon_name("system-search-symbolic")
-        suggest_btn.connect("clicked", self.search_suggestions)
-        basic.add(suggest_btn)
         form_col.append(basic)
 
         suggest_group = Adw.PreferencesGroup(title="Suggestions")
@@ -895,6 +898,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("notify::default-height", self.on_window_size_changed)
         self.connect("notify::maximized", self.on_window_size_changed)
         self.connect("notify::fullscreened", self.on_window_size_changed)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.add_controller(key_controller)
 
         self.sidebar_sc = Gtk.ScrolledWindow()
         self.sidebar_sc.set_size_request(260, -1)
@@ -969,6 +975,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.paned.set_position(270 if should_show_sidebar else 0)
 
     def on_key_pressed(self, _controller, keyval, _keycode, state):
+        if (state & Gdk.ModifierType.CONTROL_MASK) and keyval in (Gdk.KEY_f, Gdk.KEY_F):
+            self.search_toggle.set_active(not self.search_toggle.get_active())
+            return True
         if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK):
             return False
         ch = Gdk.keyval_to_unicode(keyval)
