@@ -691,7 +691,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.search = Gtk.SearchEntry(placeholder_text="Search books, authors, ISBN/ASIN, tags, categories, series")
         self.search.connect("search-changed", lambda *_: self.refresh_library())
-        content.append(self.search)
+        self.search.set_visible(False)
 
         self.dashboard = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8, row_spacing=8)
         self.dashboard.set_min_children_per_line(1)
