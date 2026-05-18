@@ -1,4 +1,4 @@
-# RedBook v5
+# RedBook
 
 RedBook is a desktop library manager for Linux (GTK4 + Libadwaita) that helps you track what you own, what you read, and what you want to read.
 
